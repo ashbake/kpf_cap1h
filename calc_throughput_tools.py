@@ -1,4 +1,5 @@
 # throughput measuring tools for KPF cap-1h with example usage at bottom
+# need to make telluric spectrum at resolution of data
 from scipy import interpolate
 
 import numpy as np
@@ -103,7 +104,6 @@ def load_standard_spec(filename,exptime=20):
 	units of output: 
 	ymod_phot_ang: photons per angstrom, 
 	xmod_new: nanometers
-
 	"""
 	fmod = fits.open(filename)
 	#fstis = fits.open('10lac_stis_006.fits')
@@ -114,7 +114,7 @@ def load_standard_spec(filename,exptime=20):
 
 	# resample onto finer and equal grid
 	fint = interpolate.interp1d(xmod,ymod,bounds_error=False,fill_value=0)
-	xmod_new = 10*np.arange(400,900,0.001) # angstrom
+	xmod_new = 10*np.arange(380,900,0.001) # angstrom
 	ymod_new = fint(xmod_new)
 
 	ymod_photdensity = ymod_new * 5.03e7 * xmod_new # now in phot/cm2/A/s - from harvard page ..times lambda
@@ -139,56 +139,28 @@ def load_em_data(filename='./data/10Lac/KP.20221110.26825.94_L1.fits',ploton=Fal
 	# Define wavelength arrays and disperion at each wavelength (nm per pixel)
 	wav_SCI_str = df_SCI_EM.columns[2:] # string (center) wavelengths of each pixel
 	wav_SCI     = df_SCI_EM.columns[2:].astype(float) # float (center) wavelengths of each pixel
+	disp_SCI = wav_SCI*0+np.gradient(wav_SCI,1)*-1
 
+	# define normalized flux array (e- / nm / time)
+	df_SCI_EM_norm        = df_SCI_EM[wav_SCI_str] * EM_gain /disp_SCI
 
-	exptime=f[0].header['EXPTIME']
-	airmass=f[0].header['AIRMASS']
-	note = f[0].header['OBJECT']
-	# not correct to sum them if wavelength sol is off for any of the traces but doing it bc wvl sols seems close enough
-	greenflux = f['GREEN_SCI_FLUX1'].data + f['GREEN_SCI_FLUX2'].data+f['GREEN_SCI_FLUX3'].data
-	redflux   = f['RED_SCI_FLUX1'].data + f['RED_SCI_FLUX2'].data+f['RED_SCI_FLUX3'].data
-	redwave   = f['RED_SCI_WAVE2'].data/10.
-	greenwave = f['GREEN_SCI_WAVE2'].data/10
+	# define time arrays
+	date_beg = np.array(df_SCI_EM["Date-Beg"], dtype=np.datetime64)
+	date_end = np.array(df_SCI_EM["Date-End"], dtype=np.datetime64)
+	tdur_sec = (date_end-date_beg).astype(float)/1000. # array exposure durations in sec
+	time     = (date_beg-date_beg[0])/1000 # array of times since beginning in sec
 
-	allflux = np.concatenate((greenflux,redflux))
-	allwave = np.concatenate((greenwave,redwave))
-	if ploton:
-		plt.figure()
-		for order in np.arange(np.shape(allwave)[0]):
-			plt.plot(allwave[order],allflux[order])
+	int_SCI_spec         = df_SCI_EM_norm.sum(axis=0) / np.sum(tdur_sec) # flux vs. wavelength per sec (use first five samples)
+	int_SCI_flux         = df_SCI_EM.sum(axis=1)                         # flux (ADU) vs. time (per sample)
 
-	return allwave,allflux,exptime,airmass,note
+	header = fits.getheader(filename)
+	#exptime=header['EXPTIME']
+	exptime=1 # data is already converted to per second
+	airmass=header['AIRMASS']
+	note   =header['OBJECT']
 
-def load_em_data(filename='./data/10Lac/KP.20221110.26825.94_L1.fits',ploton=False):
-	"""
-	"""
-	df_SCI_EM = Table.read(filename, format='fits',hdu='EXPMETER_SCI').to_pandas()
-
-	EM_gain = 1.48424 # e-/ADU
-
-	# Define wavelength arrays and disperion at each wavelength (nm per pixel)
-	wav_SCI_str = df_SCI_EM.columns[2:] # string (center) wavelengths of each pixel
-	wav_SCI     = df_SCI_EM.columns[2:].astype(float) # float (center) wavelengths of each pixel
-
-
-	exptime=f[0].header['EXPTIME']
-	airmass=f[0].header['AIRMASS']
-	note = f[0].header['OBJECT']
-	# not correct to sum them if wavelength sol is off for any of the traces but doing it bc wvl sols seems close enough
-	greenflux = f['GREEN_SCI_FLUX1'].data + f['GREEN_SCI_FLUX2'].data+f['GREEN_SCI_FLUX3'].data
-	redflux   = f['RED_SCI_FLUX1'].data + f['RED_SCI_FLUX2'].data+f['RED_SCI_FLUX3'].data
-	redwave   = f['RED_SCI_WAVE2'].data/10.
-	greenwave = f['GREEN_SCI_WAVE2'].data/10
-
-	allflux = np.concatenate((greenflux,redflux))
-	allwave = np.concatenate((greenwave,redwave))
-	if ploton:
-		plt.figure()
-		for order in np.arange(np.shape(allwave)[0]):
-			plt.plot(allwave[order],allflux[order])
-
-	return allwave,allflux,exptime,airmass,note
-
+	# reshape to match structure of kpf main data
+	return  wav_SCI.values.reshape(1,len(wav_SCI)), int_SCI_spec.values.reshape(1,len(wav_SCI)), exptime,airmass, note
 
 def load_kpf_data(filename,ploton=False):
 	"""
@@ -213,7 +185,21 @@ def load_kpf_data(filename,ploton=False):
 
 	return allwave,allflux,exptime,airmass,XPO,YPO
 
-def load_telluric(datapath='./inputs/telluric/',l0=400,l1=900,airmass=1,pwv=1):
+def load_hk_data(filename,ploton=False):
+	"""
+	"""
+	f = fits.open(filename)
+	exptime=f[0].header['EXPTIME']
+	airmass=f[0].header['AIRMASS']
+	note   =f[0].header['OBJECT']
+	# not correct to sum them if wavelength sol is off for any of the traces but doing it bc wvl sols seems close enough
+	sci = f['CA_HK_SCI'].data
+	sky = f['CA_HK_SKY'].data
+	wave = f['CA_HK_SCI_WAVE'].data
+
+	return wave,sky,exptime,airmass,note
+
+def load_telluric(datapath='./inputs/telluric/',l0=380,l1=900,airmass=1,pwv=1):
 	"""
 	filename is hard coded
 	Open psg model for all molecules
@@ -258,22 +244,38 @@ def load_telluric(datapath='./inputs/telluric/',l0=400,l1=900,airmass=1,pwv=1):
 
 	return x[isub], h2o[isub]**((pwv/pwv0) * (airmass/airmass0)) *  (co2[isub] * ch4[isub]* co[isub]* o3[isub]* n2o[isub]* o2[isub]* ray[isub])**(airmass/airmass0)
 
-def compute_throughput(kpf_file,standard_spec_file,seeing=1,expected_throughput_file='../transmission_kpf.txt'):
+def compute_throughput(kpf_file,standard_spec_file,mode='expmeter',seeing=1,expected_throughput_file='../transmission_kpf.txt'):
 	"""
+	Loads files and computes the throughput for the observation 
+
+	inputs:
+	-------
+	kpf_file (str)
+		filename of KPF file to consider, EM must be L0 file, otherwise give it L1 file
+	standard_spec_file (str)
+		file  
+
 	per wavelength bin
 	fac serves to modulate expected throughput in case want to see the factor needed to match teh calculated
 	"""
-	xdat,ydat,exptime,airmass,xpo,ypo   = load_kpf_data(kpf_file)
-	x_star,y_star   = load_standard_spec(standard_spec_file,exptime=exptime)
+	if mode=='kpf': xdat,ydat,exptime,airmass,xpo,ypo   = load_kpf_data(kpf_file)
+	if mode=='em':  xdat,ydat,exptime,airmass,note      = load_em_data(kpf_file)
+	if mode=='hk':  xdat,ydat,exptime,airmass,note      = load_hk_data(kpf_file)
+
+	Norders = np.shape(xdat)[0]
+
+	x_star,y_star         = load_standard_spec(standard_spec_file,exptime=exptime)
 	x_telluric,y_telluric = load_telluric(airmass=airmass,pwv=1.5)
 
 	# make interpolation functions for model components
-	Norders = np.shape(xdat)[0]
 	star_interp     = interpolate.interp1d(x_star,y_star,bounds_error=False,fill_value=0)
 	telluric_interp = interpolate.interp1d(x_telluric,y_telluric,bounds_error=False,fill_value=0)
 	
 	# make interpolation function for expected throughput
-	kpf_throughput_x, kpf_throughput_y = np.loadtxt(expected_throughput_file,delimiter=',').T
+	try:
+		kpf_throughput_x, kpf_throughput_y = np.loadtxt(expected_throughput_file,delimiter=',').T
+	except:
+		kpf_throughput_x, kpf_throughput_y = np.loadtxt(expected_throughput_file).T		
 	kpf_throughput_interp  = interpolate.interp1d(kpf_throughput_x, kpf_throughput_y,bounds_error=False,fill_value=0)
 
 	# calc seeing factor to adjust seeing conditions
@@ -290,13 +292,12 @@ def compute_throughput(kpf_file,standard_spec_file,seeing=1,expected_throughput_
 			if xi==xdat[order][-1]: 
 				ymod_temp[i] = ymod_temp[i-1]
 				continue
-			model_flux_per_ang = star_interp(xi)
-			ymod_temp[i] = model_flux_per_ang * 10*np.abs((xdat[order][i+1] - xdat[order][i]))
+			model_photons_per_ang = star_interp(xi)
+			ymod_temp[i] = model_photons_per_ang * 10*np.abs((xdat[order][i+1] - xdat[order][i]))
 		# store measured throughput as data / model
 		measured_throughput[order] = ydat[order]/ymod_temp
 		# store expected throughput 
-		kpf_throughput_generic     = kpf_throughput_interp(xdat[order])*telluric_interp(xdat[order]) #throughput  model times telluric spec
-		expected_throughput[order] = kpf_throughput_generic*seeing_ratio
+		expected_throughput[order] = seeing_ratio * kpf_throughput_interp(xdat[order])*telluric_interp(xdat[order]) #throughput  model times telluric spec
 
 	return xdat, measured_throughput, expected_throughput
 
