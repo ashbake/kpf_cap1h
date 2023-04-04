@@ -12,7 +12,7 @@ if __name__=='__main__':
 
 	xdat, measured_throughput, expected_throughput = compute_throughput(kpf_file,standard_spec_file,mode='kpf',seeing=seeing,expected_throughput_file=expected_throughput_file)
 	
-	title = 'HR4554 (seeing=%s) \n(file %s)'%(seeing,kpf_file.strip('_L1.fits')[1:])
+	title = starname + '(seeing=%s) \n(file %s)'%(seeing,kpf_file.split('/')[-1].strip('_L1.fits'))
 	plot_throughput(xdat, measured_throughput, expected_throughput,fac=1,title=title)
 	plt.savefig('outputs/HR4554_throughput.png')
 	plot_throughput_peaks(xdat, measured_throughput, expected_throughput,fac=1,title=title)

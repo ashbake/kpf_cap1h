@@ -4,12 +4,12 @@ from calc_throughput_tools import compute_throughput, plot_throughput, plot_thro
 
 if __name__=='__main__':
 	#load inputs
+	starname = '10Lac'# notes say tip tilt not working, so dont expect best results
 	mode='kpf'
-	starname = 'HD34816'
-	expected_throughput_file='inputs/throughput_models/transmission_kpf.txt'
-	kpf_file                = 'inputs/HD34816/KP.20230114.28871.22_L1.fits'
-	standard_spec_file      = 'inputs/HD34816/lamlep_mod_004.fits' # this might have to be made depending on source of model 
-	seeing                  = 0.55 # take from log
+	expected_throughput_file= 'inputs/throughput_models/transmission_kpf.txt'
+	kpf_file                = 'inputs/10Lac/KP.20221114.16441.86_L1.fits'
+	standard_spec_file      = 'inputs/10Lac/10lac_mod_004.fits' # this might have to be made depending on source of model 
+	seeing                  = 1 # take from log
 
 	xdat, measured_throughput, expected_throughput = compute_throughput(kpf_file,standard_spec_file,mode=mode,seeing=seeing,expected_throughput_file=expected_throughput_file)
 	
