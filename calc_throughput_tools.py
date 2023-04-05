@@ -35,12 +35,24 @@ def mod_abmag(filename ='./mhr4544.csv'):
 	hdu = fits.HDUList([primary_hdu,tbhdu])
 	hdu.writeto(filename.strip('csv')+'fits',overwrite=True)
 
-def calc_seeing_adjustment(seeing=0.7,fiber_size=1.14):
+def calc_coupling(seeing=0.7,fiber_size=1.14):
 	"""
 	make moffat function, integrate in 3 dimensions, 
 	sum that integral out to KPF fiber bounds
-
 	checked it matches steve's results
+	Returns the overlap into the fiber
+
+	inputs
+	------
+	seeing: [arcsec]
+		seeing for the observation
+	fiber_size [arcsec]
+		fiber size in arcsec
+
+	outputs:
+	-------
+	inFiber 
+		the fraction of light coupled into the fiber
 	"""
 	#def moffat(theta,seeing):
 
@@ -139,7 +151,10 @@ def load_em_data(filename='./data/10Lac/KP.20221110.26825.94_L1.fits',ploton=Fal
 	# Define wavelength arrays and disperion at each wavelength (nm per pixel)
 	wav_SCI_str = df_SCI_EM.columns[2:] # string (center) wavelengths of each pixel
 	wav_SCI     = df_SCI_EM.columns[2:].astype(float) # float (center) wavelengths of each pixel
-	disp_SCI = wav_SCI*0+np.gradient(wav_SCI,1)*-1
+	disp_SCI    = wav_SCI*0+np.gradient(wav_SCI,1)*-1
+	disp_SKY    = wav_SKY*0+np.gradient(wav_SKY,1)*-1
+	disp_SCI_smooth = np.polyval(np.polyfit(wav_SCI,disp_SCI, deg=6),wav_SCI)
+	disp_SKY_smooth = np.polyval(np.polyfit(wav_SKY,disp_SKY, deg=6),wav_SKY)
 
 	# define normalized flux array (e- / nm / time)
 	df_SCI_EM_norm        = df_SCI_EM[wav_SCI_str] * EM_gain /disp_SCI
@@ -279,7 +294,7 @@ def compute_throughput(kpf_file,standard_spec_file,mode='expmeter',seeing=1,expe
 	kpf_throughput_interp  = interpolate.interp1d(kpf_throughput_x, kpf_throughput_y,bounds_error=False,fill_value=0)
 
 	# calc seeing factor to adjust seeing conditions
-	seeing_ratio = calc_seeing_adjustment(seeing=seeing)/calc_seeing_adjustment(seeing=0.7) # steve assumes 0.7 in throughput model
+	seeing_ratio = calc_coupling(seeing=seeing)/calc_coupling(seeing=0.7) # steve assumes 0.7 in throughput model
 
 	# loop through orders to get model photons using flux density
 	# calculation is F_ang [phot/ang] * dx [ang] where dx is wavelength element of KPF pixel in real data array
