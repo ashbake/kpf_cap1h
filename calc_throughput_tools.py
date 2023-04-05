@@ -151,13 +151,12 @@ def load_em_data(filename='./data/10Lac/KP.20221110.26825.94_L1.fits',ploton=Fal
 	# Define wavelength arrays and disperion at each wavelength (nm per pixel)
 	wav_SCI_str = df_SCI_EM.columns[2:] # string (center) wavelengths of each pixel
 	wav_SCI     = df_SCI_EM.columns[2:].astype(float) # float (center) wavelengths of each pixel
-	disp_SCI    = wav_SCI*0+np.gradient(wav_SCI,1)*-1
-	disp_SKY    = wav_SKY*0+np.gradient(wav_SKY,1)*-1
-	disp_SCI_smooth = np.polyval(np.polyfit(wav_SCI,disp_SCI, deg=6),wav_SCI)
-	disp_SKY_smooth = np.polyval(np.polyfit(wav_SKY,disp_SKY, deg=6),wav_SKY)
-
-	# define normalized flux array (e- / nm / time)
-	df_SCI_EM_norm        = df_SCI_EM[wav_SCI_str] * EM_gain /disp_SCI
+	disp_SCI = wav_SCI*0+np.gradient(wav_SCI,1)*-1
+	disp_SCI_smooth   = np.polyval(np.polyfit(wav_SCI,disp_SCI, deg=6),wav_SCI)
+	wav_SCI_smooth    = wav_SCI[0] + -1*np.cumsum(disp_SCI_smooth)
+	
+	# define normalized flux array (e- / time)
+	df_SCI_EM_norm        = df_SCI_EM[wav_SCI_str] * EM_gain
 
 	# define time arrays
 	date_beg = np.array(df_SCI_EM["Date-Beg"], dtype=np.datetime64)
@@ -175,7 +174,7 @@ def load_em_data(filename='./data/10Lac/KP.20221110.26825.94_L1.fits',ploton=Fal
 	note   =header['OBJECT']
 
 	# reshape to match structure of kpf main data
-	return  wav_SCI.values.reshape(1,len(wav_SCI)), int_SCI_spec.values.reshape(1,len(wav_SCI)), exptime,airmass, note
+	return  wav_SCI_smooth.reshape(1,len(wav_SCI)), int_SCI_spec.values.reshape(1,len(wav_SCI)), exptime,airmass, note
 
 def load_kpf_data(filename,ploton=False):
 	"""
