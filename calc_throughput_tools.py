@@ -35,6 +35,34 @@ def mod_abmag(filename ='./mhr4544.csv'):
 	hdu = fits.HDUList([primary_hdu,tbhdu])
 	hdu.writeto(filename.strip('csv')+'fits',overwrite=True)
 
+
+def gaussian(x, shift, sig):
+    ' Return normalized gaussian with mean shift and var = sig^2 '
+    return np.exp(-.5*((x - shift)/sig)**2)/(sig * np.sqrt(2*np.pi))
+
+
+def define_lsf(v,res):
+    """
+    define gaussian in pixel elements to convolve resolved spectrum with to get rightish resolution
+    """
+    dlam  = np.median(v)/res
+    fwhm  = dlam/np.mean(np.diff(v)) # desired lambda spacing over current lambda spacing resolved to give sigma in array elements
+    sigma = fwhm/2.634 # FWHM is dl/l but feed sigma    
+    x = np.arange(sigma*10)
+    gaussian = (1./sigma/np.sqrt(2*np.pi)) * np.exp(-0.5*( (x - 0.5*len(x))/sigma)**2 )
+
+    return gaussian
+
+def degrade_spec(x,y,res):
+    """
+    given wavelength, flux array, and resolving power R, return  spectrum at that R
+    """
+    lsf      = define_lsf(x,res=res)
+    y_lowres = np.convolve(y,lsf,mode='same')
+
+    return y_lowres
+
+
 def calc_coupling(seeing=0.7,fiber_size=1.14):
 	"""
 	make moffat function, integrate in 3 dimensions, 
@@ -110,12 +138,22 @@ def load_standard_spec(filename,exptime=20):
 	"""
 	load flux standard spectrum
 	
-	units of model data: erg s-1 cm-2 A-1
-	model wave units: A
+	inputs:
+	------
+	filename - str
+		filename of standard star data, fits format matching calspec format
+		units of model data: erg s-1 cm-2 A-1
+		model wave units: A
 
+	exptime - [seconds]
+		exposure time to convert from photons/s/A to photons/A
+	
+	output:
+	------
+	xmod_new, ymod_phot_ang - wavelength and flux density
 	units of output: 
-	ymod_phot_ang: photons per angstrom, 
-	xmod_new: nanometers
+		ymod_phot_ang: photons per angstrom, 
+		xmod_new: nanometers
 	"""
 	fmod = fits.open(filename)
 	#fstis = fits.open('10lac_stis_006.fits')
@@ -126,7 +164,7 @@ def load_standard_spec(filename,exptime=20):
 
 	# resample onto finer and equal grid
 	fint = interpolate.interp1d(xmod,ymod,bounds_error=False,fill_value=0)
-	xmod_new = 10*np.arange(380,900,0.001) # angstrom
+	xmod_new = 10*np.arange(350,900,0.001) # angstrom
 	ymod_new = fint(xmod_new)
 
 	ymod_photdensity = ymod_new * 5.03e7 * xmod_new # now in phot/cm2/A/s - from harvard page ..times lambda
@@ -272,24 +310,24 @@ def compute_throughput(kpf_file,standard_spec_file,mode='expmeter',seeing=1,expe
 	per wavelength bin
 	fac serves to modulate expected throughput in case want to see the factor needed to match teh calculated
 	"""
-	if mode=='kpf': xdat,ydat,exptime,airmass,xpo,ypo   = load_kpf_data(kpf_file)
-	if mode=='em':  xdat,ydat,exptime,airmass,note      = load_em_data(kpf_file)
-	if mode=='hk':  xdat,ydat,exptime,airmass,note      = load_hk_data(kpf_file)
+	if mode=='kpf': xdat,ydat,exptime,airmass,xpo,ypo   = load_kpf_data(kpf_file); R=100000
+	if mode=='em':  xdat,ydat,exptime,airmass,note      = load_em_data(kpf_file); R=100
+	if mode=='hk':  xdat,ydat,exptime,airmass,note      = load_hk_data(kpf_file); R=15000
 
 	Norders = np.shape(xdat)[0]
 
 	x_star,y_star         = load_standard_spec(standard_spec_file,exptime=exptime)
+	y_star_lowres         = degrade_spec(x_star,y_star,R)
 	x_telluric,y_telluric = load_telluric(airmass=airmass,pwv=1.5)
-
-	# make interpolation functions for model components
-	star_interp     = interpolate.interp1d(x_star,y_star,bounds_error=False,fill_value=0)
-	telluric_interp = interpolate.interp1d(x_telluric,y_telluric,bounds_error=False,fill_value=0)
-	
-	# make interpolation function for expected throughput
+	y_telluric_lowres     = degrade_spec(x_telluric,y_telluric,R)
 	try:
 		kpf_throughput_x, kpf_throughput_y = np.loadtxt(expected_throughput_file,delimiter=',').T
 	except:
 		kpf_throughput_x, kpf_throughput_y = np.loadtxt(expected_throughput_file).T		
+
+	# make interpolation functions for model components
+	star_interp     = interpolate.interp1d(x_star,y_star_lowres,bounds_error=False,fill_value=0)
+	telluric_interp = interpolate.interp1d(x_telluric,y_telluric_lowres,bounds_error=False,fill_value=0)
 	kpf_throughput_interp  = interpolate.interp1d(kpf_throughput_x, kpf_throughput_y,bounds_error=False,fill_value=0)
 
 	# calc seeing factor to adjust seeing conditions
